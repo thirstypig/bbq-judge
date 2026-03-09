@@ -1,0 +1,174 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Competition {
+  id        String   @id @default(cuid())
+  name      String
+  date      DateTime
+  location  String
+  status    String   @default("SETUP") // SETUP | ACTIVE | CLOSED
+  judgePin  String?  // Shared 4-digit PIN for all judges for the day
+  createdAt DateTime @default(now())
+
+  competitors    Competitor[]
+  tables         Table[]
+  categoryRounds CategoryRound[]
+  auditLogs      AuditLog[]
+  judges         CompetitionJudge[]
+}
+
+model Competitor {
+  id                 String   @id @default(cuid())
+  competitionId      String
+  anonymousNumber    String   // 3-digit string, unique per competition
+  teamName           String
+  headCookName       String?
+  headCookKcbsNumber String?
+
+  competition Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+
+  @@unique([competitionId, anonymousNumber])
+}
+
+model User {
+  id        String @id @default(cuid())
+  cbjNumber String @unique
+  name      String
+  email     String @unique
+  role      String // JUDGE | TABLE_CAPTAIN | ORGANIZER
+  pin       String
+
+  captainOfTables          Table[]           @relation("TableCaptain")
+  tableAssignments         TableAssignment[]
+  scoreCards               ScoreCard[]
+  correctionsMade          CorrectionRequest[] @relation("CorrectionJudge")
+  correctionsDecided       CorrectionRequest[] @relation("CorrectionDecider")
+  auditLogs                AuditLog[]
+  submissionsEntered       Submission[]      @relation("SubmissionEnteredBy")
+  competitionRegistrations CompetitionJudge[]
+}
+
+model Table {
+  id            String  @id @default(cuid())
+  competitionId String
+  tableNumber   Int
+  captainId     String?
+
+  competition Competition       @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  captain     User?             @relation("TableCaptain", fields: [captainId], references: [id])
+  assignments TableAssignment[]
+  submissions Submission[]
+
+  @@unique([competitionId, tableNumber])
+}
+
+model TableAssignment {
+  id         String @id @default(cuid())
+  tableId    String
+  userId     String
+  seatNumber Int?   // 1-6, null when organizer assigns table but judge hasn't picked seat
+
+  table Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@unique([tableId, seatNumber])
+}
+
+model CompetitionJudge {
+  id            String    @id @default(cuid())
+  competitionId String
+  userId        String
+  checkedIn     Boolean   @default(false)
+  checkedInAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@unique([competitionId, userId])
+}
+
+model CategoryRound {
+  id            String @id @default(cuid())
+  competitionId String
+  categoryName  String
+  categoryType  String // MANDATORY | OPTIONAL
+  order         Int
+  status        String @default("PENDING") // PENDING | ACTIVE | SUBMITTED
+
+  competition Competition  @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+
+  @@unique([competitionId, categoryName])
+}
+
+model Submission {
+  id               String  @id @default(cuid())
+  competitorId     String?
+  categoryRoundId  String
+  tableId          String
+  boxNumber        Int
+  boxCode          String  @default("")
+  enteredByJudgeId String?
+
+  competitor      Competitor?   @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  categoryRound   CategoryRound @relation(fields: [categoryRoundId], references: [id], onDelete: Cascade)
+  table           Table         @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  enteredByJudge  User?         @relation("SubmissionEnteredBy", fields: [enteredByJudgeId], references: [id])
+  scoreCards      ScoreCard[]
+
+  @@unique([categoryRoundId, tableId, boxCode])
+}
+
+model ScoreCard {
+  id                   String    @id @default(cuid())
+  submissionId         String
+  judgeId              String
+  appearance           Int       @default(0) // 0-9
+  taste                Int       @default(0) // 0-9
+  texture              Int       @default(0) // 0-9
+  locked               Boolean   @default(false)
+  submittedAt          DateTime?
+  appearanceSubmittedAt DateTime?
+
+  submission          Submission          @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  judge               User                @relation(fields: [judgeId], references: [id])
+  correctionRequests  CorrectionRequest[]
+
+  @@unique([submissionId, judgeId])
+}
+
+model CorrectionRequest {
+  id          String    @id @default(cuid())
+  scoreCardId String
+  judgeId     String
+  reason      String
+  status      String    @default("PENDING") // PENDING | APPROVED | DENIED
+  decidedBy   String?
+  decidedAt   DateTime?
+
+  scoreCard ScoreCard @relation(fields: [scoreCardId], references: [id], onDelete: Cascade)
+  judge     User      @relation("CorrectionJudge", fields: [judgeId], references: [id])
+  decider   User?     @relation("CorrectionDecider", fields: [decidedBy], references: [id])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  competitionId String
+  actorId       String
+  action        String
+  entityId      String
+  entityType    String
+  timestamp     DateTime @default(now())
+
+  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
+  actor       User        @relation(fields: [actorId], references: [id])
+}
