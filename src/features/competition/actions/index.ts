@@ -10,6 +10,10 @@ import {
 } from "@/shared/constants/kcbs";
 import { competitionSchema, competitorSchema } from "../schemas";
 import type { CompetitionWithRelations, CompetitionJudgeWithUser } from "../types";
+import {
+  generateBoxDistribution,
+  validateDistribution,
+} from "../utils/generateBoxDistribution";
 
 // --- Create Competition ---
 
@@ -562,6 +566,119 @@ export async function randomAssignTables(competitionId: string) {
   revalidatePath(`/organizer/${competitionId}/judges`);
   revalidatePath(`/organizer/${competitionId}/setup`);
   return { assigned: shuffled.length };
+}
+
+// --- Generate Box Distribution (preview) ---
+
+async function fetchCompetitionForDistribution(competitionId: string) {
+  return prisma.competition.findUniqueOrThrow({
+    where: { id: competitionId },
+    include: {
+      competitors: { orderBy: { anonymousNumber: "asc" } },
+      tables: { orderBy: { tableNumber: "asc" } },
+      categoryRounds: { orderBy: { order: "asc" } },
+    },
+  });
+}
+
+function buildDistribution(competition: Awaited<ReturnType<typeof fetchCompetitionForDistribution>>) {
+  return generateBoxDistribution(
+    competition.competitors.map((c) => ({
+      id: c.id,
+      anonymousNumber: c.anonymousNumber,
+    })),
+    competition.tables.map((t) => ({
+      id: t.id,
+      tableNumber: t.tableNumber,
+    })),
+    competition.categoryRounds.map((cr) => ({
+      id: cr.id,
+      categoryName: cr.categoryName,
+      order: cr.order,
+    }))
+  );
+}
+
+export async function generateDistribution(competitionId: string) {
+  await requireOrganizer();
+
+  const competition = await fetchCompetitionForDistribution(competitionId);
+  const distribution = buildDistribution(competition);
+
+  await prisma.competition.update({
+    where: { id: competitionId },
+    data: { distributionStatus: "DRAFT" as const },
+  });
+
+  revalidatePath(`/organizer/${competitionId}/setup`);
+  return distribution;
+}
+
+// --- Approve Box Distribution (regenerates server-side) ---
+
+export async function approveDistribution(competitionId: string) {
+  await requireOrganizer();
+
+  // Guard: if already approved, check no scores exist
+  const competition = await fetchCompetitionForDistribution(competitionId);
+  if (competition.distributionStatus === "APPROVED") {
+    const hasScores = await prisma.scoreCard.findFirst({
+      where: {
+        submission: { categoryRound: { competitionId } },
+      },
+    });
+    if (hasScores) {
+      throw new Error("Cannot regenerate distribution — scoring has already begun");
+    }
+  }
+
+  // Regenerate distribution server-side
+  const distribution = buildDistribution(competition);
+
+  // Validate BR-2 server-side
+  const validation = validateDistribution(distribution);
+  if (!validation.valid) {
+    throw new Error(
+      `Distribution violates BR-2: ${validation.violations.length} competitor(s) appear at the same table in multiple categories`
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Delete existing scoreless submissions for this competition
+    const existingSubmissions = await tx.submission.findMany({
+      where: { categoryRound: { competitionId } },
+      include: { _count: { select: { scoreCards: true } } },
+    });
+    const toDelete = existingSubmissions
+      .filter((s) => s._count.scoreCards === 0)
+      .map((s) => s.id);
+    if (toDelete.length > 0) {
+      await tx.submission.deleteMany({
+        where: { id: { in: toDelete } },
+      });
+    }
+
+    // Create all submissions in batch
+    const submissionData = distribution.flatMap((cat) =>
+      cat.tables.flatMap((table) =>
+        table.competitors.map((comp) => ({
+          categoryRoundId: cat.categoryRoundId,
+          tableId: table.tableId,
+          competitorId: comp.competitorId,
+          boxNumber: comp.boxNumber,
+          boxCode: String(comp.boxNumber),
+        }))
+      )
+    );
+    await tx.submission.createMany({ data: submissionData });
+
+    await tx.competition.update({
+      where: { id: competitionId },
+      data: { distributionStatus: "APPROVED" as const },
+    });
+  });
+
+  revalidatePath(`/organizer/${competitionId}/setup`);
 }
 
 // --- Toggle Comment Cards ---

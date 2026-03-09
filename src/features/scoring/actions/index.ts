@@ -212,6 +212,29 @@ export async function denyCorrectionRequest(
   return correction;
 }
 
+// --- Check if Category Already Submitted by Table ---
+
+export async function isCategorySubmittedByTable(
+  tableId: string,
+  categoryRoundId: string
+): Promise<boolean> {
+  await requireAuth();
+  const table = await prisma.table.findUniqueOrThrow({
+    where: { id: tableId },
+    select: { competitionId: true },
+  });
+
+  const log = await prisma.auditLog.findFirst({
+    where: {
+      competitionId: table.competitionId,
+      action: "SUBMIT_CATEGORY",
+      entityId: `${tableId}:${categoryRoundId}`,
+      entityType: "CategoryRound",
+    },
+  });
+  return !!log;
+}
+
 // --- Submit Category to Organizer (BR-6) ---
 
 export async function submitCategoryToOrganizer(
@@ -245,13 +268,13 @@ export async function submitCategoryToOrganizer(
     select: { competitionId: true },
   });
 
-  // Log to audit
+  // Log to audit (entityId includes tableId for per-table lookup)
   await prisma.auditLog.create({
     data: {
       competitionId: table.competitionId,
       actorId: captainId,
       action: "SUBMIT_CATEGORY",
-      entityId: categoryRoundId,
+      entityId: `${tableId}:${categoryRoundId}`,
       entityType: "CategoryRound",
     },
   });

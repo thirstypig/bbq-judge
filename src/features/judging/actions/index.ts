@@ -142,49 +142,61 @@ export async function getJudgeSession(
 
   const resolvedCompetitionId = assignment.table.competitionId;
 
-  // Fetch competition details for event info + comment cards
-  const competition = await prisma.competition.findUnique({
-    where: { id: resolvedCompetitionId },
-    select: {
-      status: true,
-      commentCardsEnabled: true,
-      organizerName: true,
-      kcbsRepName: true,
-      city: true,
-      state: true,
-    },
-  });
+  // Batch parallel queries: competition, registration, activeCategory
+  const [competition, registration, activeCategory] = await Promise.all([
+    prisma.competition.findUnique({
+      where: { id: resolvedCompetitionId },
+      select: {
+        status: true,
+        commentCardsEnabled: true,
+        organizerName: true,
+        kcbsRepName: true,
+        city: true,
+        state: true,
+      },
+    }),
+    prisma.competitionJudge.findUnique({
+      where: { competitionId_userId: { competitionId: resolvedCompetitionId, userId: judge.id } },
+      select: { hasStartedJudging: true },
+    }),
+    prisma.categoryRound.findFirst({
+      where: { competitionId: resolvedCompetitionId, status: CATEGORY_STATUS.ACTIVE },
+      select: { id: true, categoryName: true, status: true, order: true },
+    }),
+  ]);
 
-  // Find the active category round
-  const activeCategory = await prisma.categoryRound.findFirst({
-    where: { competitionId: resolvedCompetitionId, status: CATEGORY_STATUS.ACTIVE },
-    select: { id: true, categoryName: true, status: true, order: true },
-  });
-
-  // Get submissions for this table in the active category
+  // Batch: submissions + commentCard count (both depend on activeCategory)
   let assignedSubmissions: SubmissionWithDetails[] = [];
+  let commentCardsDone = false;
   if (activeCategory) {
-    assignedSubmissions = (await prisma.submission.findMany({
-      where: {
-        tableId: assignment.table.id,
-        categoryRoundId: activeCategory.id,
-      },
-      include: {
-        competitor: {
-          select: { id: true, anonymousNumber: true },
+    const [subs, commentCardCount] = await Promise.all([
+      prisma.submission.findMany({
+        where: {
+          tableId: assignment.table.id,
+          categoryRoundId: activeCategory.id,
         },
-        scoreCards: {
-          where: { judgeId: judge.id },
+        include: {
+          competitor: { select: { id: true, anonymousNumber: true } },
+          scoreCards: { where: { judgeId: judge.id } },
+          categoryRound: { select: { id: true, categoryName: true, status: true } },
+          table: { select: { id: true, tableNumber: true } },
         },
-        categoryRound: {
-          select: { id: true, categoryName: true, status: true },
-        },
-        table: {
-          select: { id: true, tableNumber: true },
-        },
-      },
-      orderBy: { boxNumber: "asc" },
-    })) as SubmissionWithDetails[];
+        orderBy: { boxNumber: "asc" },
+      }),
+      competition?.commentCardsEnabled
+        ? prisma.commentCard.count({
+            where: {
+              judgeId: judge.id,
+              categoryRoundId: activeCategory.id,
+              submission: { tableId: assignment.table.id },
+            },
+          })
+        : Promise.resolve(0),
+    ]);
+    assignedSubmissions = subs as SubmissionWithDetails[];
+    commentCardsDone = competition?.commentCardsEnabled
+      ? commentCardCount >= subs.length
+      : false;
   }
 
   return {
@@ -195,11 +207,38 @@ export async function getJudgeSession(
     assignedSubmissions,
     competitionStatus: competition?.status ?? "SETUP",
     commentCardsEnabled: competition?.commentCardsEnabled ?? false,
+    hasStartedJudging: registration?.hasStartedJudging ?? false,
+    commentCardsDone,
     organizerName: competition?.organizerName ?? null,
     kcbsRepName: competition?.kcbsRepName ?? null,
     city: competition?.city ?? null,
     state: competition?.state ?? null,
   };
+}
+
+// --- Mark Judging Started ---
+
+export async function markJudgingStarted(competitionId: string) {
+  const { userId } = await requireJudge();
+
+  // Verify judge is registered and competition is active
+  const registration = await prisma.competitionJudge.findUnique({
+    where: { competitionId_userId: { competitionId, userId } },
+    include: { competition: { select: { status: true } } },
+  });
+  if (!registration) {
+    throw new Error("You are not registered for this competition");
+  }
+  if (registration.competition.status !== "ACTIVE" && registration.competition.status !== "SETUP") {
+    throw new Error("This competition is no longer active");
+  }
+
+  await prisma.competitionJudge.update({
+    where: { competitionId_userId: { competitionId, userId } },
+    data: { hasStartedJudging: true },
+  });
+
+  revalidatePath("/judge");
 }
 
 // --- Get Submissions for Judge ---

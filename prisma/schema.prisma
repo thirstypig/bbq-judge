@@ -8,6 +8,11 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum DistributionStatus {
+  DRAFT
+  APPROVED
+}
+
 model Competition {
   id                  String   @id @default(cuid())
   name                String
@@ -19,8 +24,9 @@ model Competition {
   kcbsRepName         String?
   city                String?
   state               String?
-  commentCardsEnabled Boolean  @default(false)
-  createdAt           DateTime @default(now())
+  commentCardsEnabled Boolean              @default(false)
+  distributionStatus  DistributionStatus?
+  createdAt           DateTime             @default(now())
 
   competitors    Competitor[]
   tables         Table[]
@@ -89,12 +95,13 @@ model TableAssignment {
 }
 
 model CompetitionJudge {
-  id            String    @id @default(cuid())
-  competitionId String
-  userId        String
-  checkedIn     Boolean   @default(false)
-  checkedInAt   DateTime?
-  createdAt     DateTime  @default(now())
+  id                String    @id @default(cuid())
+  competitionId     String
+  userId            String
+  checkedIn         Boolean   @default(false)
+  checkedInAt       DateTime?
+  hasStartedJudging Boolean   @default(false)
+  createdAt         DateTime  @default(now())
 
   competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   user        User        @relation(fields: [userId], references: [id])
@@ -179,6 +186,8 @@ model AuditLog {
 
   competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
   actor       User        @relation(fields: [actorId], references: [id])
+
+  @@index([competitionId, action, entityType])
 }
 
 model CommentCard {
