@@ -14,6 +14,7 @@ export {
   getJudgeSetupState,
   getJudgeSession,
   getActiveCompetitionForJudge,
+  markJudgingStarted,
   submitCommentCard,
   getCommentCardsForJudge,
 } from "./actions";

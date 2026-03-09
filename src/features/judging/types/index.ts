@@ -34,6 +34,8 @@ export type JudgeSession = {
   assignedSubmissions: SubmissionWithDetails[];
   competitionStatus: string;
   commentCardsEnabled: boolean;
+  hasStartedJudging: boolean;
+  commentCardsDone: boolean;
   organizerName: string | null;
   kcbsRepName: string | null;
   city: string | null;

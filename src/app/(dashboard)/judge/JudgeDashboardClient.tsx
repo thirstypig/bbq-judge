@@ -14,6 +14,7 @@ import {
   FontSizeControl,
   useFontSize,
   getJudgeSession,
+  markJudgingStarted,
 } from "@features/judging";
 import type { JudgeSession, JudgePhase } from "@features/judging";
 
@@ -27,12 +28,8 @@ interface Props {
   };
 }
 
-function detectPhase(
-  session: JudgeSession,
-  hasStarted: boolean,
-  commentCardsDone: Record<string, boolean>
-): JudgePhase {
-  if (!hasStarted) return "event-info";
+function detectPhase(session: JudgeSession): JudgePhase {
+  if (!session.hasStartedJudging) return "event-info";
 
   const { activeCategory, assignedSubmissions } = session;
 
@@ -47,12 +44,7 @@ function detectPhase(
   // All locked = done (or comment cards)
   const allLocked = scoreCards.every((sc) => sc?.locked);
   if (allLocked) {
-    // Check if comment cards are enabled and not yet done
-    if (
-      session.commentCardsEnabled &&
-      activeCategory &&
-      !commentCardsDone[activeCategory.id]
-    ) {
+    if (session.commentCardsEnabled && !session.commentCardsDone) {
       return "comment-cards";
     }
     return "done";
@@ -62,31 +54,13 @@ function detectPhase(
   const allAppearanceDone = scoreCards.every((sc) => sc?.appearanceSubmittedAt);
   if (!allAppearanceDone) return "appearance";
 
-  // Appearance done, taste/texture not done
   return "taste-texture";
 }
 
 export function JudgeDashboardClient({ cbjNumber, judgeName, competitionInfo }: Props) {
   const [session, setSession] = useState<JudgeSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [hasStarted, setHasStarted] = useState(false);
-  const [commentCardsDone, setCommentCardsDone] = useState<Record<string, boolean>>({});
   const { fontSize, increase, decrease } = useFontSize();
-
-  // Hydrate localStorage state
-  useEffect(() => {
-    if (session) {
-      const compId = session.table.competitionId;
-      const started = localStorage.getItem(`bbq-judge-started-${compId}`) === "true";
-      setHasStarted(started);
-
-      if (session.activeCategory) {
-        const crId = session.activeCategory.id;
-        const done = localStorage.getItem(`bbq-judge-comments-done-${crId}`) === "true";
-        setCommentCardsDone((prev) => ({ ...prev, [crId]: done }));
-      }
-    }
-  }, [session]);
 
   const loadSession = useCallback(async () => {
     const result = await getJudgeSession();
@@ -120,20 +94,18 @@ export function JudgeDashboardClient({ cbjNumber, judgeName, competitionInfo }: 
     );
   }
 
-  const phase = detectPhase(session, hasStarted, commentCardsDone);
+  const phase = detectPhase(session);
   const { activeCategory, assignedSubmissions } = session;
 
-  function handleStart() {
+  async function handleStart() {
     const compId = session!.table.competitionId;
-    localStorage.setItem(`bbq-judge-started-${compId}`, "true");
-    setHasStarted(true);
+    await markJudgingStarted(compId);
+    await loadSession();
   }
 
   function handleCommentCardsDone() {
-    if (activeCategory) {
-      localStorage.setItem(`bbq-judge-comments-done-${activeCategory.id}`, "true");
-      setCommentCardsDone((prev) => ({ ...prev, [activeCategory.id]: true }));
-    }
+    // Server derives commentCardsDone from CommentCard records
+    loadSession();
   }
 
   return (
@@ -219,6 +191,7 @@ export function JudgeDashboardClient({ cbjNumber, judgeName, competitionInfo }: 
           submissions={assignedSubmissions}
           judgeId={session.judge.id}
           onDone={loadSession}
+
         />
       )}
 
@@ -228,6 +201,7 @@ export function JudgeDashboardClient({ cbjNumber, judgeName, competitionInfo }: 
           submissions={assignedSubmissions}
           judgeId={session.judge.id}
           onDone={loadSession}
+
         />
       )}
 
@@ -239,6 +213,7 @@ export function JudgeDashboardClient({ cbjNumber, judgeName, competitionInfo }: 
           judgeId={session.judge.id}
           cbjNumber={cbjNumber}
           onDone={handleCommentCardsDone}
+
         />
       )}
 
@@ -249,6 +224,7 @@ export function JudgeDashboardClient({ cbjNumber, judgeName, competitionInfo }: 
           description="Waiting for the Table Captain to submit the round."
         />
       )}
+
     </div>
   );
 }

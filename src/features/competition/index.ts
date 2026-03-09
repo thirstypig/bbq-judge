@@ -19,12 +19,15 @@ export {
   TableSetupPanelAssignForm,
 } from "./components/TableSetupPanel";
 export { CommentCardToggle } from "./components/CommentCardToggle";
+export { BoxDistributionPanel } from "./components/BoxDistributionPanel";
 export {
   getCompetitions,
   getCompetitionById,
   getCompetitionRoster,
   advanceCategoryRound,
   toggleCommentCards,
+  generateDistribution,
+  approveDistribution,
 } from "./actions";
 export type {
   CompetitionWithRelations,

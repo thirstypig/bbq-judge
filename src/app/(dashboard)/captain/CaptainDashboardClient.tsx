@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Shield, Clock } from "lucide-react";
 import { PageHeader } from "@/shared/components/common/PageHeader";
 import { LoadingSpinner } from "@/shared/components/common/LoadingSpinner";
@@ -13,9 +13,11 @@ import {
   ScoreReviewTable,
   CorrectionRequestPanel,
   SubmitCategoryDialog,
+  CategorySubmittedScreen,
   getTableScoringStatus,
   getTableScoreCards,
   getPendingCorrectionRequests,
+  isCategorySubmittedByTable,
   submitCategoryToOrganizer,
 } from "@features/scoring";
 import type { TableScoringStatus, ScoreCardWithJudge, CorrectionRequestWithDetails } from "@features/scoring";
@@ -26,13 +28,22 @@ interface Props {
   captainName: string;
 }
 
+type CaptainPhase =
+  | "no-assignment"
+  | "waiting-for-meat"
+  | "judging-in-progress"
+  | "ready-to-review"
+  | "category-submitted";
+
 type ActiveTab = "status" | "scores";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CaptainDashboardClient({ cbjNumber, captainName }: Props) {
   const [session, setSession] = useState<JudgeSession | null>(null);
   const [scoringStatus, setScoringStatus] = useState<TableScoringStatus | null>(null);
   const [scoreCards, setScoreCards] = useState<ScoreCardWithJudge[]>([]);
   const [corrections, setCorrections] = useState<CorrectionRequestWithDetails[]>([]);
+  const [categorySubmitted, setCategorySubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,7 +56,7 @@ export function CaptainDashboardClient({ cbjNumber, captainName }: Props) {
       setSession(judgeSession);
 
       if (judgeSession?.table && judgeSession.activeCategory) {
-        const [status, cards, reqs] = await Promise.all([
+        const [status, cards, reqs, submitted] = await Promise.all([
           getTableScoringStatus(
             judgeSession.table.id,
             judgeSession.activeCategory.id
@@ -55,10 +66,17 @@ export function CaptainDashboardClient({ cbjNumber, captainName }: Props) {
             judgeSession.activeCategory.id
           ),
           getPendingCorrectionRequests(judgeSession.table.id),
+          isCategorySubmittedByTable(
+            judgeSession.table.id,
+            judgeSession.activeCategory.id
+          ),
         ]);
         setScoringStatus(status);
         setScoreCards(cards);
         setCorrections(reqs);
+        setCategorySubmitted(submitted);
+      } else {
+        setCategorySubmitted(false);
       }
     } catch {
       // Ignore polling errors
@@ -67,11 +85,32 @@ export function CaptainDashboardClient({ cbjNumber, captainName }: Props) {
     }
   }, []);
 
+  // Derive phase
+  function getPhase(): CaptainPhase {
+    if (!session) return "no-assignment";
+    if (!session.activeCategory) return "waiting-for-meat";
+    if (categorySubmitted) return "category-submitted";
+    if (scoringStatus?.allJudgesDone && corrections.length === 0) return "ready-to-review";
+    return "judging-in-progress";
+  }
+
+  const phase = loading ? null : getPhase();
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+
+  // Poll — faster during judging-in-progress, stable interval via ref
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 10_000);
+    const interval = setInterval(loadData, 5_000);
     return () => clearInterval(interval);
   }, [loadData]);
+
+  // Auto-switch to scores tab when ready to review
+  useEffect(() => {
+    if (phase === "ready-to-review") {
+      setActiveTab("scores");
+    }
+  }, [phase]);
 
   async function handleSubmitCategory() {
     if (!session?.table || !session.activeCategory) return;
@@ -98,7 +137,7 @@ export function CaptainDashboardClient({ cbjNumber, captainName }: Props) {
     );
   }
 
-  if (!session) {
+  if (phase === "no-assignment") {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -114,19 +153,36 @@ export function CaptainDashboardClient({ cbjNumber, captainName }: Props) {
     );
   }
 
+  if (!session || phase === "waiting-for-meat") {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Table Captain"
+          subtitle={session ? `${session.judge.name} — Table ${session.table.tableNumber}` : ""}
+        />
+        <EmptyState
+          icon={Clock}
+          title="No active category"
+          description="Waiting for the organizer to start the next judging round..."
+        />
+      </div>
+    );
+  }
+
+  // After this point, session is guaranteed non-null by the phase checks above
   const { activeCategory, assignedSubmissions } = session;
 
-  if (!activeCategory) {
+  if (phase === "category-submitted" && activeCategory && scoringStatus) {
     return (
       <div className="space-y-6">
         <PageHeader
           title="Table Captain"
           subtitle={`${session.judge.name} — Table ${session.table.tableNumber}`}
         />
-        <EmptyState
-          icon={Clock}
-          title="No active category"
-          description="Waiting for the organizer to start the next judging round..."
+        <CategorySubmittedScreen
+          categoryName={activeCategory.categoryName}
+          totalCards={scoringStatus.submittedScoreCards}
+          totalJudges={scoringStatus.judges.length}
         />
       </div>
     );
@@ -140,11 +196,22 @@ export function CaptainDashboardClient({ cbjNumber, captainName }: Props) {
       />
 
       {/* Active category banner */}
-      <ActiveCategoryBanner
-        categoryName={activeCategory.categoryName}
-        submissions={assignedSubmissions}
-        judgeId={session.judge.id}
-      />
+      {activeCategory && (
+        <ActiveCategoryBanner
+          categoryName={activeCategory.categoryName}
+          submissions={assignedSubmissions}
+          judgeId={session.judge.id}
+        />
+      )}
+
+      {/* Ready to review banner */}
+      {phase === "ready-to-review" && (
+        <div className="rounded-lg border-2 border-green-500 bg-green-50 p-4 text-center dark:bg-green-900/20">
+          <p className="text-sm font-semibold text-green-700 dark:text-green-400">
+            All judges have submitted — ready for review and submission
+          </p>
+        </div>
+      )}
 
       {/* Correction requests */}
       {corrections.length > 0 && (

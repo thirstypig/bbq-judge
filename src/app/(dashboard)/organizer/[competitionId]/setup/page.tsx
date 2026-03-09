@@ -10,6 +10,7 @@ import {
   CompetitorListAddForm,
   CompetitorListTable,
   CommentCardToggle,
+  BoxDistributionPanel,
   getCompetitionById,
 } from "@features/competition";
 
@@ -35,6 +36,14 @@ export default async function CompetitorsPage({ params }: Props) {
         <CompetitorListAddForm />
         <CompetitorListTable />
       </CompetitorListRoot>
+
+      {/* Box Distribution */}
+      <BoxDistributionPanel
+        competitionId={competition.id}
+        distributionStatus={competition.distributionStatus}
+        tableCount={competition.tables.length}
+        competitorCount={competition.competitors.length}
+      />
 
       {/* Settings */}
       <CommentCardToggle
