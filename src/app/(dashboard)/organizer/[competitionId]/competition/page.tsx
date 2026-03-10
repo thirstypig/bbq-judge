@@ -86,7 +86,7 @@ export default function CompetitionPage() {
         categoryRounds={competition.categoryRounds}
       />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
       {/* Category rounds detail */}
       <div className="grid gap-4 md:grid-cols-2">

@@ -341,6 +341,11 @@ export async function getDetailedCategoryResults(
     where: { id: categoryRoundId },
   });
 
+  // Verify category round belongs to the specified competition
+  if (round.competitionId !== competitionId) {
+    throw new Error("Category round does not belong to this competition");
+  }
+
   const submissions = await prisma.submission.findMany({
     where: { categoryRoundId },
     include: {

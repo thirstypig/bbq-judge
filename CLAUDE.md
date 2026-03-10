@@ -49,23 +49,30 @@ src/
       loading.tsx           — Dashboard-level loading spinner
       error.tsx             — Dashboard-level error boundary
       not-found.tsx         — Dashboard-level 404
-      organizer/            — Organizer pages (competitions, setup, status, results)
+      organizer/            — Organizer pages
+        [competitionId]/
+          teams/            — BBQ Teams registration, check-in, boxes
+          judges/           — Judge registration, check-in, table assignment
+          competition/      — Box distribution, comment cards, category control
+          results/          — Progress, results, score audit, audit log
       judge/                — Judge scoring dashboard + sheet panel
       captain/              — Table captain review + submit dashboard
     api/auth/[...nextauth]/ — Auth API route
   features/                 — Feature modules (isolated domains)
-    competition/            — Competition CRUD, setup, status, CompetitionProvider
+    competition/            — Competition CRUD, box distribution, category advancement, CompetitionProvider
     judging/                — Judge scoring, score cards, correction requests
     scoring/                — Table captain scoring review, corrections, category submission
     tabulation/             — Results tabulation, winner declaration, export, audit log
-    users/                  — User management (stub)
+    users/                  — Judge import (JudgeImportForm component)
   shared/
     components/
       common/               — Design system: PageHeader, StatusBadge, DataTable, SectionCard, etc.
       ui/                   — Primitives: button, input, label, badge, alert-dialog, card, tabs, dropdown-menu, table, sheet
     constants/kcbs.ts       — KCBS rules, categories, enums
     lib/
-      auth.ts               — next-auth config (JWT strategy)
+      auth.ts               — next-auth config (JWT strategy, bcrypt, rate limiting)
+      auth-guards.ts        — Server action auth guards (requireAuth, requireOrganizer, requireJudge, requireCaptain)
+      rate-limit.ts         — In-memory sliding-window rate limiter for login
       prisma.ts             — Prisma singleton
       utils.ts              — cn() utility
     types/                  — Re-exported Prisma model types
@@ -134,7 +141,16 @@ Session uses JWT strategy. Includes `role` and `cbjNumber` via JWT callbacks (ca
 - Desktop: fixed 240px sidebar with role-filtered navigation
 - Mobile: Sheet drawer triggered by hamburger menu
 - Top bar: competition selector (organizer only), ThemeToggle, user avatar + sign out
-- Nav links for Setup/Status/Results resolve to active competition ID
+- Nav links for Teams/Judges/Competition/Results resolve to active competition ID
+
+### Server-Side Auth Guards (`src/shared/lib/auth-guards.ts`)
+- `requireAuth()` — any authenticated user, throws "Unauthorized"
+- `requireOrganizer()` — ORGANIZER role only
+- `requireJudge()` — JUDGE or TABLE_CAPTAIN, returns `{ userId, cbjNumber }`
+- `requireCaptain()` — TABLE_CAPTAIN or ORGANIZER, returns `{ userId }`
+- **All server actions must start with an auth guard** — never rely solely on route middleware
+- **Captain actions must verify table ownership** — check `table.captainId === userId` after auth
+- **Score/correction data requires captain+ownership or organizer** — prevents IDOR cross-table access
 
 ### CompetitionProvider (`src/features/competition/components/CompetitionProvider.tsx`)
 - React context wrapping the dashboard layout
@@ -145,24 +161,25 @@ Session uses JWT strategy. Includes `role` and `cbjNumber` via JWT callbacks (ca
 ## Testing
 
 Unit tests use **Vitest** (`vitest.config.ts` at project root). Tests live alongside source in `__tests__/` directories:
-- `features/competition/utils/__tests__/` — BR-2 validation
-- `features/tabulation/utils/__tests__/` — tabulation logic (averages, DQ, outliers)
-- `features/judging/schemas/__tests__/` — scorecard schema validation
+- `features/competition/utils/__tests__/` — BR-2 validation, box distribution algorithm + edge cases
+- `features/tabulation/utils/__tests__/` — tabulation logic (averages, DQ, outliers, tiebreaking) + edge cases
+- `features/judging/schemas/__tests__/` — scorecard, correction, tableSetup, boxCode schema validation
+
+**7 test files, 113 tests total.** See `TESTING.md` for the full integration smoke test checklist.
 
 Pure utility functions extracted for testability:
-- `features/competition/utils/` — `validateNoRepeatCompetitor()` (pure version)
-- `features/tabulation/utils/` — `tabulateCategory()` (pure version)
-
-See `TESTING.md` for the integration smoke test checklist.
+- `features/competition/utils/` — `validateNoRepeatCompetitor()`, `generateBoxDistribution()` (pure versions)
+- `features/tabulation/utils/` — `tabulateCategory()`, `calcWeightedTotal()` (pure versions)
 
 ## Seed Data
 
 - Competition: "American Royal Open 2026" (ACTIVE)
 - Organizer: organizer@bbq-judge.test / organizer123
-- 12 Judges: CBJ-001 through CBJ-012, all PIN: 1234
-- Table 1 Captain: CBJ-001, Table 2 Captain: CBJ-007
-- Competitors: 101–106 (6 teams)
+- 24 Judges: 100001–100024, all PIN: 1234
+- 4 Tables with captains: 100001, 100007, 100013, 100019 (6 judges each)
+- 24 BBQ Teams: 101–124 (16 checked in, 8 not)
 - Categories: Chicken (ACTIVE), Pork Ribs, Pork, Brisket (PENDING)
+- Competition judgePin: "1234"
 - Pre-filled: Table 1 Chicken scores for competitors 101–104
 - Competitor 104 has DQ score + pending correction request
 

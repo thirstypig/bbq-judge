@@ -82,7 +82,7 @@ export function CommentCardScreen({
   }
 
   async function handleSubmit() {
-    if (!selectedId || !currentCard) return;
+    if (!selectedId || !currentCard || loading) return;
     setError(null);
     setLoading(true);
     try {
@@ -288,7 +288,7 @@ export function CommentCardScreen({
           />
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </div>
 
       {/* Actions */}
