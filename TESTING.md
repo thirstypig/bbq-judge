@@ -1,27 +1,8 @@
 # Testing
 
-## Unit Tests
+For how to run, write, and debug unit tests, see [docs/how-to/run-tests.md](docs/how-to/run-tests.md).
 
-Run with Vitest:
-
-```bash
-npm test          # single run
-npm run test:watch # watch mode
-```
-
-### Test Coverage
-
-| Module | File | Tests |
-|--------|------|-------|
-| competition | `utils/__tests__/validateNoRepeatCompetitor.test.ts` | BR-2 repeat competitor validation (5 tests) |
-| competition | `utils/__tests__/generateBoxDistribution.test.ts` | Box distribution algorithm — cyclic + greedy paths (8 tests) |
-| competition | `utils/__tests__/generateBoxDistribution.edge.test.ts` | Box distribution edge cases — boundaries, sorting, box number integrity (14 tests) |
-| tabulation | `utils/__tests__/tabulateCategory.test.ts` | Average calc, ranking, DQ flagging, outlier detection (13 tests) |
-| tabulation | `utils/__tests__/tabulateCategory.edge.test.ts` | Tabulation edge cases — DQ ordering, drop lowest, tiebreakers, misuse scenarios (22 tests) |
-| judging | `schemas/__tests__/scorecardSchema.test.ts` | Score range validation, integer enforcement, DQ detection (17 tests) |
-| judging | `schemas/__tests__/allSchemas.test.ts` | All schemas — scorecard, correction, tableSetup, boxCode, hasDQScore exhaustive validation (34 tests) |
-
-**Total: 7 test files, 113 tests**
+Quick reference: `npm test` (single run) | `npm run test:watch` (watch mode) | 7 test files, 113 tests.
 
 ## Integration Smoke Test (Manual)
 
